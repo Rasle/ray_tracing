@@ -2,7 +2,8 @@ use std::{io::{Write, LineWriter},
     fs::File,
     sync::{Arc, RwLock, mpsc::channel},
     thread,
-    rc::Rc};
+    rc::Rc,
+    time::Instant};
 
 use minifb::{Key, Window, WindowOptions};
 
@@ -36,7 +37,7 @@ fn main() {
     const ASPECT_RATIO : f64 = 3.0 / 2.0;
     const WIDTH : u32 = 1200;
     const HEIGHT : u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
-    const SAMPLES_PER_PIXEL : i64 = 500;
+    const SAMPLES_PER_PIXEL : i64 = 1;
     const MAX_DEPTH : i64 = 50;
 
     const FLAT_SIZE : usize = (WIDTH * HEIGHT) as usize;
@@ -62,6 +63,8 @@ fn main() {
         let file = File::create("image.ppm").expect("Failed to create file");
         let mut file = LineWriter::new(file);
         file.write_all(format!("P3\n{} {}\n255\n", WIDTH, HEIGHT).as_bytes()).expect("Failed to write data");
+
+        let now = Instant::now();
         for j in (0..HEIGHT).rev() {
             eprint!("\rScanlines remaining: {} ", j);
             for i in 0..WIDTH {
@@ -81,7 +84,7 @@ fn main() {
             sender.send(RenderStatus::Processing).unwrap();
         }
 
-        eprint!("\nDone.\n");
+        eprint!("\nDone in {} seconds\n", now.elapsed().as_secs_f32());
         sender.send(RenderStatus::Done).unwrap();
     });
 
