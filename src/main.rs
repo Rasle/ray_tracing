@@ -26,6 +26,11 @@ use random::*;
 mod material;
 use material::*;
 
+enum RenderStatus {
+    Processing,
+    Done
+}
+
 fn main() {
     // Image
     const ASPECT_RATIO : f64 = 3.0 / 2.0;
@@ -58,6 +63,7 @@ fn main() {
         let mut file = LineWriter::new(file);
         file.write_all(format!("P3\n{} {}\n255\n", WIDTH, HEIGHT).as_bytes()).expect("Failed to write data");
         for j in (0..HEIGHT).rev() {
+            eprint!("\rScanlines remaining: {} ", j);
             for i in 0..WIDTH {
                 let mut pixel_color = Vec3::zeros();
                 for _s in 0..SAMPLES_PER_PIXEL {
@@ -72,8 +78,11 @@ fn main() {
                 set_color(&mut *write, index, pixel_color, SAMPLES_PER_PIXEL);
                 drop(write);
             }
-            sender.send(j).unwrap();
+            sender.send(RenderStatus::Processing).unwrap();
         }
+
+        eprint!("\nDone.\n");
+        sender.send(RenderStatus::Done).unwrap();
     });
 
     let options = WindowOptions { borderless : false , title : true, resize : true, scale : minifb::Scale::X1, scale_mode : minifb::ScaleMode::Center, topmost : false, transparency : false, none : false};
@@ -90,26 +99,24 @@ fn main() {
     // Limit to max ~60 fps update rate
     window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        let progress = receiver.recv();
+        let progress = receiver.try_recv();
         match progress {
-            Ok(value) => {
-                eprint!("\rScanlines remaining: {} ", value);
-                let read = c_lock.read().unwrap();
-                window
-                    .update_with_buffer(& *read, WIDTH as usize, HEIGHT as usize)
-                    .unwrap();
-                drop(read);
+            Ok(status) => {
+                match status {
+                    RenderStatus::Processing => {
+                        let read = c_lock.read().unwrap();
+                        window
+                            .update_with_buffer(& *read, WIDTH as usize, HEIGHT as usize)
+                            .unwrap();
+                        drop(read);
+                    },
+                    RenderStatus::Done => {
+                        window.update()
+                    },
+                }
             },
             Err(_) => {
-                eprint!("\nDone.\n");
-                let read = c_lock.read().unwrap();
-                while window.is_open() && !window.is_key_down(Key::Escape) {
-                    window
-                    .update_with_buffer(& *read, WIDTH as usize, HEIGHT as usize)
-                    .unwrap();
-                }
-                drop(read);
-                break;
+                window.update()
             },
         }
     }
