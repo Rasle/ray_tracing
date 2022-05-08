@@ -37,7 +37,7 @@ fn main() {
     const ASPECT_RATIO : f64 = 3.0 / 2.0;
     const WIDTH : u32 = 1200;
     const HEIGHT : u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
-    const SAMPLES_PER_PIXEL : i64 = 1;
+    const SAMPLES_PER_PIXEL : i64 = 500;
     const MAX_DEPTH : i64 = 50;
 
     const FLAT_SIZE : usize = (WIDTH * HEIGHT) as usize;
