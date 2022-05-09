@@ -3,7 +3,7 @@ use crate::ray::Ray;
 use crate::sphere::HitRecord;
 use crate::random::*;
 
-pub trait Material {
+pub trait Material : Sync {
     fn scatter(&self, r_in : &Ray, rec : &HitRecord) -> Option<(Vec3, Ray)>;
 }
 
