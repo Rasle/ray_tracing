@@ -1,25 +1,23 @@
-use std::rc::Rc;
-
 use crate::vec3::Vec3;
 use crate::ray::Ray;
 use crate::material::Material;
 
-pub struct HitRecord {
+pub struct HitRecord<'a> {
 	pub p : Vec3,
 	pub normal : Vec3,
-	pub mat : Rc<dyn Material>,
+	pub mat : &'a dyn Material,
 	pub t : f64,
 	pub front_facing : bool,
 }
 
-impl HitRecord {
+impl HitRecord<'_> {
 	fn set_face_normal(&mut self, r : Ray, outward_normal : Vec3) {
 		self.front_facing = Vec3::dot(r.direction, outward_normal) < 0.0;
 		self.normal = if self.front_facing {outward_normal} else {-outward_normal};
 	}
 }
 
-pub trait Hittable {
+pub trait Hittable : Sync {
 	fn hit(&self, r : Ray, t_min : f64, t_max : f64) -> Option<HitRecord>;
 }
 
@@ -60,19 +58,19 @@ impl Hittable for HittableList {
 	}
 }
 
-pub struct Sphere {
+pub struct Sphere<M:Material> {
 	pub center : Vec3,
 	pub radius : f64,
-	pub material : Rc<dyn Material>,
+	pub material : M,
 }
 
-impl Sphere {
-	pub fn new(center : Vec3, radius : f64, material : Rc<dyn Material>) -> Self {
+impl<M:Material> Sphere<M> {
+	pub fn new(center : Vec3, radius : f64, material : M) -> Self {
 		Sphere { center, radius, material }
 	}
 }
 
-impl Hittable for Sphere {
+impl<M:Material> Hittable for Sphere<M> {
 	fn hit(&self, r : Ray, t_min : f64, t_max : f64) -> Option<HitRecord> {
 		let oc = r.origin - self.center;
 		let a = r.direction.length_squared();
@@ -99,7 +97,7 @@ impl Hittable for Sphere {
 			p,
 			t : root,
 			normal : outward_normal,
-			mat : self.material.clone(),
+			mat : &self.material,
 			front_facing : false,
 		};
 		hit_record.set_face_normal(r, outward_normal);
