@@ -37,7 +37,7 @@ enum RenderStatus {
 fn main() {
     // Image
     const ASPECT_RATIO : f64 = 16.0 / 9.0;
-    const WIDTH : u32 = 1280;
+    const WIDTH : u32 = 1200;
     const HEIGHT : u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
     const SAMPLES_PER_PIXEL : i64 = 32;
     const MAX_DEPTH : i64 = 10;
@@ -78,7 +78,7 @@ fn main() {
                     let ray = camera.get_ray(u, v);
                     pixel_color += ray_color(ray, &world, MAX_DEPTH);
                 }
-                set_color(r, pixel_color, SAMPLES_PER_PIXEL);
+                *r = set_color(pixel_color, SAMPLES_PER_PIXEL);
             });
 
             let input = buf_input.input_buffer();
@@ -156,7 +156,7 @@ fn write_color(file : &mut LineWriter<File>, color : Vec3, samples_per_pixel : i
     file.write_all(data.as_bytes()).expect("Failed to write data");
 }
 
-fn set_color (data : &mut u32, color : Vec3, samples_per_pixel : i64) {
+fn set_color (color : Vec3, samples_per_pixel : i64) -> u32 {
     let scale = 1.0 / samples_per_pixel as f64;
     let r = (color.x * scale).sqrt();
     let g = (color.y * scale).sqrt();
@@ -166,7 +166,7 @@ fn set_color (data : &mut u32, color : Vec3, samples_per_pixel : i64) {
     let ug = (256.0 * clamp(g, 0.0, 0.999)) as u32;
     let ub = (256.0 * clamp(b, 0.0, 0.999)) as u32;
 
-    *data = (255 << 24) + (ur << 16) + (ug << 8) + ub;
+    (255 << 24) + (ur << 16) + (ug << 8) + ub
 }
 
 fn ray_color(r : Ray, world : &HittableList, depth : i64) -> Vec3 {
