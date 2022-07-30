@@ -1,8 +1,18 @@
-use std::{io::{Write, LineWriter},
+#![warn(
+    clippy::all,
+    clippy::restriction,
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::cargo
+)]
+
+use std::{
     fs::File,
+    io::{LineWriter, Write},
     sync::mpsc::channel,
     thread,
-    time::Instant};
+    time::Instant,
+};
 
 use minifb::{Key, Window, WindowOptions};
 
@@ -16,9 +26,9 @@ mod ray;
 use ray::Ray;
 
 mod sphere;
-use sphere::Sphere;
 use sphere::Hittable;
 use sphere::HittableList;
+use sphere::Sphere;
 
 mod camera;
 use camera::Camera;
@@ -31,18 +41,18 @@ use material::*;
 
 enum RenderStatus {
     Processing,
-    Done
+    Done,
 }
 
 fn main() {
     // Image
-    const ASPECT_RATIO : f64 = 16.0 / 9.0;
-    const WIDTH : u32 = 1200;
-    const HEIGHT : u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
-    const SAMPLES_PER_PIXEL : i64 = 32;
-    const MAX_DEPTH : i64 = 10;
+    const ASPECT_RATIO: f64 = 16.0 / 9.0;
+    const WIDTH: u32 = 1200;
+    const HEIGHT: u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
+    const SAMPLES_PER_PIXEL: i64 = 32;
+    const MAX_DEPTH: i64 = 10;
 
-    const FLAT_SIZE : usize = (WIDTH * HEIGHT) as usize;
+    const FLAT_SIZE: usize = (WIDTH * HEIGHT) as usize;
     let pixel_data = vec![0; WIDTH as usize];
 
     let buf = TripleBuffer::new(&pixel_data);
@@ -60,11 +70,20 @@ fn main() {
         let vup = Vec3::new(0.0, 1.0, 0.0);
         let dist_to_focus = 10.0;
         let aperture = 0.1;
-        let camera = Camera::new(lookfrom, lookat, vup, 20.0, ASPECT_RATIO, aperture, dist_to_focus);
+        let camera = Camera::new(
+            lookfrom,
+            lookat,
+            vup,
+            20.0,
+            ASPECT_RATIO,
+            aperture,
+            dist_to_focus,
+        );
 
         let file = File::create("image.ppm").expect("Failed to create file");
         let mut file = LineWriter::new(file);
-        file.write_all(format!("P3\n{} {}\n255\n", WIDTH, HEIGHT).as_bytes()).expect("Failed to write data");
+        file.write_all(format!("P3\n{} {}\n255\n", WIDTH, HEIGHT).as_bytes())
+            .expect("Failed to write data");
 
         let now = Instant::now();
         let mut pixel_data = vec![0; FLAT_SIZE];
@@ -94,7 +113,16 @@ fn main() {
         sender.send(RenderStatus::Done).unwrap();
     });
 
-    let options = WindowOptions { borderless : false , title : true, resize : true, scale : minifb::Scale::X1, scale_mode : minifb::ScaleMode::Center, topmost : false, transparency : false, none : false};
+    let options = WindowOptions {
+        borderless: false,
+        title: true,
+        resize: true,
+        scale: minifb::Scale::X1,
+        scale_mode: minifb::ScaleMode::Center,
+        topmost: false,
+        transparency: false,
+        none: false,
+    };
     let mut window = Window::new(
         "Ray Tracer - ESC to exit",
         WIDTH as usize,
@@ -106,43 +134,38 @@ fn main() {
     });
 
     let mut render_data = vec![255; FLAT_SIZE];
-    let mut counter = HEIGHT-1;
+    let mut counter = HEIGHT - 1;
     // Limit to max ~60 fps update rate
     window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let progress = receiver.try_recv();
         match progress {
-            Ok(status) => {
-                match status {
-                    RenderStatus::Processing => {
-                        if buf_output.update() {
-                            let output = buf_output.output_buffer();
-                            for (i, o) in output.iter().enumerate() {
-                                let index = ((HEIGHT - (counter as u32) - 1) * WIDTH + (i as u32)) as usize;
-                                render_data[index] = *o;
-                            }
-                            window
-                                .update_with_buffer(&render_data, WIDTH as usize, HEIGHT as usize)
-                                .unwrap();
-
-                            counter -= 1;
+            Ok(status) => match status {
+                RenderStatus::Processing => {
+                    if buf_output.update() {
+                        let output = buf_output.output_buffer();
+                        for (i, o) in output.iter().enumerate() {
+                            let index =
+                                ((HEIGHT - (counter as u32) - 1) * WIDTH + (i as u32)) as usize;
+                            render_data[index] = *o;
                         }
-                    },
-                    RenderStatus::Done => {
-                        window.update()
-                    },
+                        window
+                            .update_with_buffer(&render_data, WIDTH as usize, HEIGHT as usize)
+                            .unwrap();
+
+                        counter -= 1;
+                    }
                 }
+                RenderStatus::Done => window.update(),
             },
-            Err(_) => {
-                window.update()
-            },
+            Err(_) => window.update(),
         }
     }
 
     eprint!("Exited program");
 }
 
-fn write_color(file : &mut LineWriter<File>, color : Vec3, samples_per_pixel : i64) {
+fn write_color(file: &mut LineWriter<File>, color: Vec3, samples_per_pixel: i64) {
     let scale = 1.0 / samples_per_pixel as f64;
     let r = (color.x * scale).sqrt();
     let g = (color.y * scale).sqrt();
@@ -153,10 +176,11 @@ fn write_color(file : &mut LineWriter<File>, color : Vec3, samples_per_pixel : i
     let ib = (256.0 * clamp(b, 0.0, 0.999)) as i64;
 
     let data = format!("{} {} {}\n", ir, ig, ib);
-    file.write_all(data.as_bytes()).expect("Failed to write data");
+    file.write_all(data.as_bytes())
+        .expect("Failed to write data");
 }
 
-fn set_color (color : Vec3, samples_per_pixel : i64) -> u32 {
+fn set_color(color: Vec3, samples_per_pixel: i64) -> u32 {
     let scale = 1.0 / samples_per_pixel as f64;
     let r = (color.x * scale).sqrt();
     let g = (color.y * scale).sqrt();
@@ -169,25 +193,21 @@ fn set_color (color : Vec3, samples_per_pixel : i64) -> u32 {
     (255 << 24) + (ur << 16) + (ug << 8) + ub
 }
 
-fn ray_color(r : Ray, world : &HittableList, depth : i64) -> Vec3 {
+fn ray_color(r: Ray, world: &HittableList, depth: i64) -> Vec3 {
     if depth <= 0 {
         Vec3::zeros()
-    }
-    else if let Some(hit) = world.hit(r, 0.001, f64::INFINITY) {
-        if let Some((attenuation, scattered)) = hit.mat.scatter(&r, &hit){
+    } else if let Some(hit) = world.hit(r, 0.001, f64::INFINITY) {
+        if let Some((attenuation, scattered)) = hit.mat.scatter(&r, &hit) {
             attenuation * ray_color(scattered, world, depth - 1)
-        }
-        else {
+        } else {
             Vec3::zeros()
         }
-    }
-    else {
+    } else {
         let unit_direction = Vec3::unit_vector(r.direction);
         let t = 0.5 * (unit_direction.y + 1.0);
         (1.0 - t) * Vec3::ones() + t * Vec3::new(0.5, 0.7, 1.0)
     }
 }
-
 
 // fn test_scene() -> HittableList {
 //     let mut world = HittableList::new();
@@ -218,24 +238,30 @@ fn random_scene() -> HittableList {
     let mut world = HittableList::new();
 
     let ground_material = Lambertian::new(Vec3::new(0.5, 0.5, 0.5));
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0, ground_material)));
+    world.add(Box::new(Sphere::new(
+        Vec3::new(0.0, -1000.0, 0.0),
+        1000.0,
+        ground_material,
+    )));
 
     for a in -11..11 {
         for b in -11..11 {
             let choose_mat = random_f64();
-            let center = Vec3::new(a as f64 + 0.9 * random_f64(), 0.2, b as f64 + 0.9 * random_f64());
+            let center = Vec3::new(
+                a as f64 + 0.9 * random_f64(),
+                0.2,
+                b as f64 + 0.9 * random_f64(),
+            );
 
             if (center - Vec3::new(4.0, 0.2, 0.0)).length() > 0.9 {
                 if choose_mat < 0.8 {
                     let albedo = Vec3::random() * Vec3::random();
                     world.add(Box::new(Sphere::new(center, 0.2, Lambertian::new(albedo))));
-                }
-                else if choose_mat < 0.95 {
+                } else if choose_mat < 0.95 {
                     let albedo = Vec3::random_range(0.5, 1.0);
                     let fuzz = random_f64_range(0.0, 0.5);
                     world.add(Box::new(Sphere::new(center, 0.2, Metal::new(albedo, fuzz))));
-                }
-                else {
+                } else {
                     world.add(Box::new(Sphere::new(center, 0.2, Dielectric::new(1.5))));
                 };
             }
@@ -243,18 +269,30 @@ fn random_scene() -> HittableList {
     }
 
     let material1 = Dielectric::new(1.5);
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0, material1)));
+    world.add(Box::new(Sphere::new(
+        Vec3::new(0.0, 1.0, 0.0),
+        1.0,
+        material1,
+    )));
 
     let material2 = Lambertian::new(Vec3::new(0.4, 0.2, 0.1));
-    world.add(Box::new(Sphere::new(Vec3::new(-4.0, 1.0, 0.0), 1.0, material2)));
+    world.add(Box::new(Sphere::new(
+        Vec3::new(-4.0, 1.0, 0.0),
+        1.0,
+        material2,
+    )));
 
     let material3 = Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0);
-    world.add(Box::new(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0, material3)));
+    world.add(Box::new(Sphere::new(
+        Vec3::new(4.0, 1.0, 0.0),
+        1.0,
+        material3,
+    )));
 
     world
 }
 
 #[inline(always)]
-fn clamp(x : f64, min : f64, max : f64) -> f64 {
+fn clamp(x: f64, min: f64, max: f64) -> f64 {
     x.max(min).min(max)
 }
