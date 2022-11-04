@@ -4,12 +4,14 @@ use std::{
     sync::mpsc::channel,
     thread,
     time::Instant,
+    env,
 };
-
-use minifb::{Key, Window, WindowOptions};
 
 use rayon::prelude::*;
 use triple_buffer::TripleBuffer;
+
+extern crate nalgebra as na;
+use na::Vector3;
 
 mod vec3;
 use vec3::Vec3;
@@ -29,48 +31,55 @@ mod random;
 use random::*;
 
 mod material;
-use material::*;
 
-enum RenderStatus {
-    Processing,
-    Done,
+mod scene;
+use scene::Scene;
+
+mod render;
+use render::*;
+
+#[derive(Clone, Copy)]
+enum RunningMode {
+    File,
+    Render,
 }
 
 fn main() {
+    rayon::ThreadPoolBuilder::new().num_threads(12).build_global().unwrap();
+    let args:Vec<String> = env::args().collect();
+    let mode = 
+        if args.len() < 2 {
+            RunningMode::Render
+        }
+        else {
+            let flag = &args[1];
+            match flag.as_str() {
+                "-File" => RunningMode::File,
+                "-Render" => RunningMode::Render,
+                _ => RunningMode::Render
+            }
+        };
     // Image
     const ASPECT_RATIO: f64 = 16.0 / 9.0;
     const WIDTH: u32 = 1200;
     const HEIGHT: u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
-    const SAMPLES_PER_PIXEL: i64 = 32;
-    const MAX_DEPTH: i64 = 10;
+    const SAMPLES_PER_PIXEL: i64 = 500;
+    const MAX_DEPTH: i64 = 50;
 
     const FLAT_SIZE: usize = (WIDTH * HEIGHT) as usize;
     let pixel_data = vec![0; WIDTH as usize];
 
     let buf = TripleBuffer::new(&pixel_data);
-    let (mut buf_input, mut buf_output) = buf.split();
+    let (mut buffer_input, buffer_output) = buf.split();
 
     let (sender, receiver) = channel();
+    let render = Render::new(buffer_output, receiver);
 
     thread::spawn(move || {
+        let scene = Scene::one_weekend_scene(ASPECT_RATIO);
         // World
-        let world = random_scene();
-
-        // Camera
-        let lookfrom = Vec3::new(13.0, 2.0, 3.0);
-        let lookat = Vec3::new(0.0, 0.0, 0.0);
-        let vup = Vec3::new(0.0, 1.0, 0.0);
-        let dist_to_focus = 10.0;
-        let aperture = 0.1;
-        let camera = Camera::new(
-            lookfrom,
-            lookat,
-            vup,
-            20.0,
-            ASPECT_RATIO,
-            aperture,
-            dist_to_focus,
-        );
+        let world = scene.objects;
+        let camera = scene.camera;
 
         let file = File::create("image.ppm").expect("Failed to create file");
         let mut file = LineWriter::new(file);
@@ -92,82 +101,38 @@ fn main() {
                 *r = set_color(pixel_color, SAMPLES_PER_PIXEL);
             });
 
-            let input = buf_input.input_buffer();
-            input.clear();
-            for i in 0..row.len() {
-                input.push(row[i]);
+            match mode {
+                RunningMode::File => write_color_row(&mut file, row.iter()),
+                RunningMode::Render => {
+                    let input = buffer_input.input_buffer();
+                    input.clear();
+                    input.extend(row.iter());
+                    buffer_input.publish();
+                    sender.send(RenderStatus::Processing).unwrap();
+                }
             }
-            buf_input.publish();
-            sender.send(RenderStatus::Processing).unwrap();
         }
 
         eprint!("\nDone in {} seconds\n", now.elapsed().as_secs_f32());
         sender.send(RenderStatus::Done).unwrap();
     });
 
-    let options = WindowOptions {
-        borderless: false,
-        title: true,
-        resize: true,
-        scale: minifb::Scale::X1,
-        scale_mode: minifb::ScaleMode::Center,
-        topmost: false,
-        transparency: false,
-        none: false,
-    };
-    let mut window = Window::new(
-        "Ray Tracer - ESC to exit",
-        WIDTH as usize,
-        HEIGHT as usize,
-        options,
-    )
-    .unwrap_or_else(|e| {
-        panic!("{}", e);
-    });
-
-    let mut render_data = vec![255; FLAT_SIZE];
-    let mut counter = HEIGHT - 1;
-    // Limit to max ~60 fps update rate
-    window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
-    while window.is_open() && !window.is_key_down(Key::Escape) {
-        let progress = receiver.try_recv();
-        match progress {
-            Ok(status) => match status {
-                RenderStatus::Processing => {
-                    if buf_output.update() {
-                        let output = buf_output.output_buffer();
-                        for (i, o) in output.iter().enumerate() {
-                            let index =
-                                ((HEIGHT - (counter as u32) - 1) * WIDTH + (i as u32)) as usize;
-                            render_data[index] = *o;
-                        }
-                        window
-                            .update_with_buffer(&render_data, WIDTH as usize, HEIGHT as usize)
-                            .unwrap();
-
-                        counter -= 1;
-                    }
-                }
-                RenderStatus::Done => window.update(),
-            },
-            Err(_) => window.update(),
-        }
-    }
+    let render_data: Vec<u32> = vec![255; FLAT_SIZE];
+    render.render(render_data, WIDTH, HEIGHT);
 
     eprint!("Exited program");
 }
 
-fn write_color(file: &mut LineWriter<File>, color: Vec3, samples_per_pixel: i64) {
-    let scale = 1.0 / samples_per_pixel as f64;
-    let r = (color.x * scale).sqrt();
-    let g = (color.y * scale).sqrt();
-    let b = (color.z * scale).sqrt();
+fn write_color_row<'a>(file: &mut LineWriter<File>, colors: impl Iterator<Item = &'a u32>) {
+    colors.for_each(|c| write_color(file, c))
+}
 
-    let ir = (256.0 * clamp(r, 0.0, 0.999)) as i64;
-    let ig = (256.0 * clamp(g, 0.0, 0.999)) as i64;
-    let ib = (256.0 * clamp(b, 0.0, 0.999)) as i64;
+fn write_color(file: &mut LineWriter<File>, color: &u32) {
+    let r = color >> 16 & 0xFF;
+    let g = color >> 8 & 0xFF;
+    let b = color & 0xFF;
 
-    let data = format!("{} {} {}\n", ir, ig, ib);
+    let data = format!("{} {} {}\n", r, g, b);
     file.write_all(data.as_bytes())
         .expect("Failed to write data");
 }
@@ -225,64 +190,6 @@ fn ray_color(r: Ray, world: &HittableList, depth: i64) -> Vec3 {
 //     let aperture = 2.0;
 //     Camera::new(lookfrom, lookat, vup, 90.0, aspect_ratio, aperture, dist_to_focus)
 // }
-
-fn random_scene() -> HittableList {
-    let mut world = HittableList::new();
-
-    let ground_material = Lambertian::new(Vec3::new(0.5, 0.5, 0.5));
-    world.add(Box::new(Sphere::new(
-        Vec3::new(0.0, -1000.0, 0.0),
-        1000.0,
-        ground_material,
-    )));
-
-    for a in -11..11 {
-        for b in -11..11 {
-            let choose_mat = random_f64();
-            let center = Vec3::new(
-                a as f64 + 0.9 * random_f64(),
-                0.2,
-                b as f64 + 0.9 * random_f64(),
-            );
-
-            if (center - Vec3::new(4.0, 0.2, 0.0)).length() > 0.9 {
-                if choose_mat < 0.8 {
-                    let albedo = Vec3::random() * Vec3::random();
-                    world.add(Box::new(Sphere::new(center, 0.2, Lambertian::new(albedo))));
-                } else if choose_mat < 0.95 {
-                    let albedo = Vec3::random_range(0.5, 1.0);
-                    let fuzz = random_f64_range(0.0, 0.5);
-                    world.add(Box::new(Sphere::new(center, 0.2, Metal::new(albedo, fuzz))));
-                } else {
-                    world.add(Box::new(Sphere::new(center, 0.2, Dielectric::new(1.5))));
-                };
-            }
-        }
-    }
-
-    let material1 = Dielectric::new(1.5);
-    world.add(Box::new(Sphere::new(
-        Vec3::new(0.0, 1.0, 0.0),
-        1.0,
-        material1,
-    )));
-
-    let material2 = Lambertian::new(Vec3::new(0.4, 0.2, 0.1));
-    world.add(Box::new(Sphere::new(
-        Vec3::new(-4.0, 1.0, 0.0),
-        1.0,
-        material2,
-    )));
-
-    let material3 = Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0);
-    world.add(Box::new(Sphere::new(
-        Vec3::new(4.0, 1.0, 0.0),
-        1.0,
-        material3,
-    )));
-
-    world
-}
 
 #[inline(always)]
 fn clamp(x: f64, min: f64, max: f64) -> f64 {
